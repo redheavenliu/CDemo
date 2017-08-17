@@ -1,0 +1,14 @@
+ROOT=..
+include $(ROOT)/Make.defines
+
+PROGS =	main chapter_4 chapter_8
+
+all:	$(PROGS)
+
+%:	%.c $(LIBM)
+	$(CC) $(CFLAGS) $@.c -o $(ROOT)/out/apue_$@ $(LDFLAGS) $(LDLIBS)
+
+clean:
+	rm -f $(PROGS) $(TEMPFILES) *.o file.hole
+
+include $(ROOT)/Make.libapue.inc
