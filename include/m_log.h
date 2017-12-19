@@ -1,10 +1,11 @@
 #ifndef M_LOG_H
 #define M_LOG_H
 
+#include <stdbool.h>
 
 ////////////////////////////////////
 typedef unsigned char uint8;
-typedef unsigned char bool;
+//typedef unsigned char bool;
 ////////////////////////////////////
 
 

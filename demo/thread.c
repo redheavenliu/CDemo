@@ -78,6 +78,20 @@ static void * thr_fn_2(void * arg)
     printf("thread(%ld) exit\n",thread_id);
 }
 
+static int thread_number = 0;
+static void * thr_fn_3(void * arg)
+{
+	int thread_id = pthread_self();
+    printf("thread(%ld) start.\n",thread_id);
+	int i = 1;
+	while(i < 100){
+		printf("%ld : %d\n",thread_id,i++);
+		//usleep(10);
+	}
+	printf("thread(%ld) exit.\n",thread_id);
+	thread_number--;
+}
+
 /*
 *
 *Êä³ö:
@@ -121,10 +135,32 @@ int main_2()
 }
 
 
+int main_3()
+{
+    pthread_t thread_1,thread_2;
+	thread_number = 2;
+    if (0 != pthread_create(&thread_1, NULL, thr_fn_3, NULL))
+    {
+        printf("error when create pthread1,%d\n", errno);
+        return 1;
+    }
 
+    if (0 != pthread_create(&thread_2, NULL, thr_fn_3, NULL))
+    {
+        printf("error when create pthread2,%d\n", errno);
+        return 1;
+    }
+
+	while(thread_number > 0){
+		usleep(100);
+	}
+
+    return 0;
+}
 
 int main(int argc,char *argv)
 {
     //return main_1();
-    return main_2();
+    //return main_2();
+    return main_3();
 }

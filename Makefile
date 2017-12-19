@@ -1,4 +1,4 @@
-DIRS = lib apue demo x unpv13e
+DIRS = lib apue demo x unpv13e stanet
 
 all:
 	@for i in $(DIRS); do \

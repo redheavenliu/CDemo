@@ -1,6 +1,8 @@
 #ifndef M_TYPE_H
 #define M_TYPE_H
 
+#include <stdbool.h>
+
 #include "../config"
 
 /**

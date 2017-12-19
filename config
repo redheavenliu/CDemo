@@ -19,7 +19,7 @@
 #define M_BOOLEAN_DEFINED
 
 // Define bool ?
-#define M_BOOL_DEFINED
+//#define M_BOOL_DEFINED
 
 // Define uint64 ?
 #define M_UINT64_DEFINED

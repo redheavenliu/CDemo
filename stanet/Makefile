@@ -1,14 +1,16 @@
 ROOT=..
 include $(ROOT)/Make.defines
 
-PROGS =	main chapter_4 chapter_8 chapter_11 chapter_13
+PROGS =	stanet
 
 all:	$(PROGS)
 
-%:	%.c $(LIBM)
-	$(CC) $(CFLAGS) $@.c -o $(ROOT)/out/apue_$@ $(LDFLAGS) $(LDLIBS)
+stanet:	*.c \
+	$(LIBM)
+	$(CC) $(CFLAGS) $^ -o $(ROOT)/out/stanet_$@ $(LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f $(PROGS) $(TEMPFILES) *.o file.hole
 
 include $(ROOT)/Make.libapue.inc
+
