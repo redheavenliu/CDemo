@@ -31,6 +31,8 @@
 static sta_session_s *session_list = NULL;
 static int session_count = 0;
 static pthread_mutex_t mutex;
+static struct epoll_event epoll_events[20];
+static int epoll_fd = -1;
 
 static void* thread_run(void *data);
 
@@ -164,6 +166,7 @@ static void session_list_create(){
 	int i;
 
 	pthread_mutex_init(&mutex, NULL);
+	epoll_fd = epoll_create(256);
 
 	sta_session_s *session;
 	for(i = 0;i<SESSION_MAX_COUNT;i++){
@@ -242,8 +245,6 @@ static void socket_open(sta_session_s *session){
 	}
 	memcpy(&servaddr.sin_addr, he->h_addr, sizeof(struct in_addr));
 
-	sleep(5);
-
 	/* Set interval timer to go off before 3WHS completes */
 	//signal(SIGALRM, sig_alrm);
 
@@ -275,6 +276,44 @@ static void socket_open(sta_session_s *session){
 		}
 	}
 
+	fd_set rset, wset;
+	FD_ZERO(&rset);
+	FD_ZERO(&wset);
+	FD_SET(session->sockfd, &rset);
+	FD_SET(session->sockfd, &wset);
+	struct timeval time_out;
+	time_out.tv_sec = 10; // 10 s
+	time_out.tv_usec = 0;
+	int nready = select(session->sockfd + 1, &rset, &wset, NULL, &time_out);
+	sta_log("nready = %d",nready);
+	if(nready == 0){// Timeout
+		sta_log("Timeout.");
+		goto result_fail_with_close;
+	}else{
+		if (FD_ISSET(session->sockfd, &rset) && FD_ISSET(session->sockfd, &wset)) {
+			int error = -1;
+			int len = sizeof(int);
+			sta_log("Can read and write.");
+			if(getsockopt(session->sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0){
+				sta_log("getsockopt fail.[%d]",errno);
+				goto result_fail_with_close;
+			}else{
+				sta_log("error = %d",error);
+				if(error == 0){ // Success
+					goto result_success;
+				}else{// Fail
+					goto result_fail_with_close;
+				}
+			}
+		}else if(FD_ISSET(session->sockfd, &wset)){
+			sta_log("Can write.");
+			goto result_success;
+		}else{
+			sta_log("Can read(Impossible).");
+			goto result_fail_with_close;
+		}
+	}
+
 //	struct itimerval value;
 //	value.it_value.tv_sec = 0;
 //	value.it_value.tv_usec = 0;
@@ -299,6 +338,11 @@ static void socket_open(sta_session_s *session){
 
 result_success:
 	session->state = STA_SESSION_STATE_OPENED;
+
+	struct epoll_event ev;
+    ev.data.fd = session->sockfd;
+    ev.events = EPOLLIN | EPOLLET;
+    epoll_ctl(epoll_fd,EPOLL_CTL_ADD,session->sockfd,&ev);
 
 	sta_log("end:success");
 	return;
@@ -328,7 +372,7 @@ static void* thread_run(void *data){
 				int i = 0;
 				while(msg->data[i] != ':')
 					i++;
-				sta_log("index = %d",i);
+				//sta_log("index = %d",i);
 				if(i > 0 && i < SESSION_HOST_MAX_LEN){
 					memcpy(session->host,msg->data,i);
 					session->port = (int)atoi((msg->data) + i + 1);
@@ -394,36 +438,38 @@ int main (int argc, char **argv)
 
 
 	send_msg(2, STA_MSG_SOCKET_OPEN, "www.baidu.com:80");
+	send_msg(0, STA_MSG_SOCKET_OPEN, "22.22.22.22:80");
+	send_msg(1, STA_MSG_SOCKET_OPEN, "192.168.1.198:80");
 
-	sleep(3);
 
-	int fd = session_get(2)->sockfd;
-	struct epoll_event ev,events[20];
-    int epfd = epoll_create(256);
-    ev.data.fd = fd;
-    ev.events = EPOLLOUT | EPOLLIN | EPOLLET;
-    epoll_ctl(epfd,EPOLL_CTL_ADD,fd,&ev);
-
-	sta_log("fd = %d",fd);
 	int nready;
-
     while (TRUE) {
-        nready = epoll_wait(epfd,events,20,-1);
+        nready = epoll_wait(epoll_fd,epoll_events,20,-1);
         for(int i=0;i<nready;++i) {
-            if (events[i].events & EPOLLIN) {
-                sta_log("%d can read.",events[i].data.fd);
+            if ((epoll_events[i].events & EPOLLIN) && (epoll_events[i].events & EPOLLOUT)) {
+                sta_log("%d can read and write.",epoll_events[i].data.fd);
+				int error = -1;
+				int len = sizeof(int);
+				if(getsockopt(epoll_events[i].data.fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0){
+					sta_log("getsockopt fail.[%d]",errno);
+				}else{
+					sta_log("error = %d",error);
+				}
                 //ev.data.fd=sockfd;
                 //ev.events=EPOLLOUT|EPOLLET;
                 //epoll_ctl(epfd,EPOLL_CTL_MOD,sockfd,&ev);
-            } else if (events[i].events & EPOLLOUT) {
-                sta_log("%d can write.",events[i].data.fd);
-				int error = -1;
-				getsockopt(events[i].data.fd, SOL_SOCKET, SO_ERROR, &error, sizeof(int));
-				sta_log("error = %d",error);
-
+            } else if (epoll_events[i].events & EPOLLOUT) {
+                sta_log("%d can write.",epoll_events[i].data.fd);
 //                ev.data.fd=sockfd;
 //                ev.events=EPOLLIN|EPOLLET;
 //                epoll_ctl(epfd,EPOLL_CTL_MOD,sockfd,&ev);
+            } else if (epoll_events[i].events & EPOLLIN) {
+                sta_log("%d can read and write.",epoll_events[i].data.fd);
+                //ev.data.fd=sockfd;
+                //ev.events=EPOLLOUT|EPOLLET;
+                //epoll_ctl(epfd,EPOLL_CTL_MOD,sockfd,&ev);
+            } else {
+				sta_log("%d can net read and write.",epoll_events[i].data.fd);
             }
         }
     }
