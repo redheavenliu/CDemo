@@ -85,10 +85,12 @@ typedef unsigned char byte; /* byte type */
 #define SESSION_HOST_MAX_LEN 128
 #define SESSION_MSG_MAX_LEN 2048
 
-
 typedef enum {
-	STA_SESSION_ERR_SUCCESS,
-	STA_SESSION_ERR_MAX,
+	STA_SESSION_ERR_SUCCESS, /* Success */
+	STA_SESSION_ERR_TO_MORE, /* No usable session */
+	STA_SESSION_ERR_HOST,	 /* Host error */
+	STA_SESSION_ERR_CONN,	 /* Connect error */
+
 
 	STA_SESSION_ERR_UNKNOWN
 } sta_session_err_enum;
@@ -139,6 +141,9 @@ typedef struct sta_session{
 } sta_session_s;
 
 
-
+int stanet_session_open(const char *host,int port);
+int stanet_session_write(int session_id,void *buf,int len);
+int stanet_session_read(int session_id,void *buf,int len);
+int stanet_session_close(int session_id);
 
 #endif /* INCLUDE_STANET_TYPE_H */

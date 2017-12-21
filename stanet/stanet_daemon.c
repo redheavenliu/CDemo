@@ -17,20 +17,19 @@
 #include <netdb.h>
 #include <sys/epoll.h>
 
-
 #include "stanet_type.h"
 #include "stanet_qmi.h"
 
+#define	SA struct sockaddr
 #define sta_log(fmt...) \
 		pthread_mutex_lock(&mutex); \
         log_i(fmt); \
         pthread_mutex_unlock(&mutex);
 
-#define	SA struct sockaddr
 
 static sta_session_s *session_list = NULL;
-static int session_count = 0;
-static pthread_mutex_t mutex;
+//static int session_count = 0;
+pthread_mutex_t mutex;
 static struct epoll_event epoll_events[20];
 static int epoll_fd = -1;
 
@@ -61,31 +60,22 @@ static bool session_init(sta_session_s *session,int id) {
 	return TRUE;
 }
 
-static void session_reset(sta_session_s *session) {
-	session->sockfd = -1;
-	session->err = STA_SESSION_ERR_SUCCESS;
-	session->state = STA_SESSION_STATE_UNUSED;
-
-	memset(session->host,0,SESSION_HOST_MAX_LEN);
-	session->port = -1;
-	return TRUE;
-}
 
 
 static void list_deinit(sta_session_s *list) {
 
 }
 
-static sta_msg_q_s* msg_queue_delete(sta_session_s* session){
-	sta_log("start");
+static sta_msg_q_s* msg_queue_pop(sta_session_s* session){
+	//sta_log("start");
 	sta_msg_q_s *msg = session->msg_q;
 	session->msg_q = session->msg_q->next;
 	msg->next = NULL;
-	sta_log("end");
+	//sta_log("end");
 	return msg;
 }
 
-static void msg_queue_insert(sta_session_s* session,sta_msg_q_s *msg){
+static void msg_queue_put(sta_session_s* session,sta_msg_q_s *msg){
 	//sta_log("start");
     pthread_mutex_lock(&(session->mutex));
 	msg->next = NULL;
@@ -103,10 +93,44 @@ static void msg_queue_insert(sta_session_s* session,sta_msg_q_s *msg){
 	//sta_log("end");
 }
 
-static bool session_add(sta_session_s *session) {
-	if(session_count >= SESSION_MAX_COUNT) {
-		return FALSE;
+static void msg_queue_clear(sta_session_s* session){
+	//sta_log("start");
+	sta_msg_q_s *msg = session->msg_q;
+	while(msg){
+		session->msg_q = session->msg_q->next;
+		free(msg);
+		msg = session->msg_q;
 	}
+	session->msg_q = NULL;
+	//sta_log("end");
+}
+
+
+static void session_reset(sta_session_s *session) {
+	pthread_mutex_lock(&mutex);
+	session->err = STA_SESSION_ERR_SUCCESS;
+	session->state = STA_SESSION_STATE_UNUSED;
+
+	memset(session->host,0,SESSION_HOST_MAX_LEN);
+	session->port = -1;
+
+	struct epoll_event ev;
+    ev.data.fd = session->sockfd;
+    ev.events = EPOLLIN | EPOLLET;
+    epoll_ctl(epoll_fd,EPOLL_CTL_DEL,session->sockfd,&ev);
+
+	close(session->sockfd);
+	session->sockfd = -1;
+
+	msg_queue_clear(session);
+	pthread_mutex_unlock(&mutex);
+}
+
+
+static bool session_add(sta_session_s *session) {
+//	if(session_count >= SESSION_MAX_COUNT) {
+//		return FALSE;
+//	}
 
 	session->pre = NULL;
 	session->next = session_list;
@@ -116,7 +140,7 @@ static bool session_add(sta_session_s *session) {
 	}
 	session_list = session;
 
-	session_count++;
+	//session_count++;
 	return TRUE;
 }
 
@@ -124,6 +148,7 @@ static bool session_del(sta_session_s *session) {
 	if(session_list == NULL || session == NULL || session->session_id == -1)
 		return FALSE;
 
+	pthread_mutex_lock(&mutex);
 	sta_session_s *session_p = session_list;
 	while(session_p){
 		if(session->session_id == session_p->session_id) {
@@ -141,27 +166,49 @@ static bool session_del(sta_session_s *session) {
 
 			free(session_p);
 			session_p = NULL;
-			session_count--;
+			//session_count--;
+			pthread_mutex_unlock(&mutex);
 			return TRUE;
 		}
 		session_p = session_p->next;
 	}
+	pthread_mutex_unlock(&mutex);
 
 	return FALSE;
 }
 
 static sta_session_s* session_get(int session_id) {
+	//sta_log("start:%d",session_id);
 	sta_session_s *session_p = session_list;
 	while(session_p){
 		if(session_id == session_p->session_id) {
+			//sta_log("end:return not NULL");
 			return session_p;
 		}
 		session_p = session_p->next;
 	}
 
+	//sta_log("end:return NULL");
 	return NULL;
 }
 
+static int session_get_usable(void) {
+	pthread_mutex_lock(&mutex);
+	sta_session_s *session_p = session_list;
+	while(session_p){
+		if(session_p->state == STA_SESSION_STATE_UNUSED) {
+			pthread_mutex_unlock(&mutex);
+			return session_p->session_id;
+		}
+		session_p = session_p->next;
+	}
+	pthread_mutex_unlock(&mutex);
+	return -1;
+}
+
+
+// Create session.The session number is SESSION_MAX_COUNT,
+// and session ID is [0 - (SESSION_MAX_COUNT-1)]
 static void session_list_create(){
 	int i;
 
@@ -171,22 +218,22 @@ static void session_list_create(){
 	sta_session_s *session;
 	for(i = 0;i<SESSION_MAX_COUNT;i++){
 		sta_session_s *session = (sta_session_s*)malloc(sizeof(sta_session_s));
-		if(session_init(session,i)){
+		if(session_init(session,SESSION_MAX_COUNT - i - 1)){
 			session_add(session);
 		}
 	}
 }
 
-static void send_msg(int session_id,sta_msg_id_enum msg_id,void *data){
+static void send_msg(int session_id,sta_msg_id_enum msg_id,void *data,int len){
 	//sta_log("start");
 	sta_msg_q_s *msg = (sta_msg_q_s*)malloc(sizeof(sta_msg_q_s));
 	memset(msg,0,sizeof(sta_msg_q_s));
 	msg->msg_id = msg_id;
 	msg->next = NULL;
-	msg->data_len = strlen((char*)data);
-	memcpy(msg->data,data,msg->data_len);
-
-	msg_queue_insert(session_get(session_id),msg);
+	msg->data_len = len;
+	if(data != NULL && len > 0)
+		memcpy(msg->data,data,msg->data_len);
+	msg_queue_put(session_get(session_id),msg);
 	//sta_log("end");
 }
 
@@ -241,6 +288,7 @@ static void socket_open(sta_session_s *session){
 	struct hostent *he = gethostbyname(session->host);
 	if (he == NULL){
 		sta_log("gethostbyname() fail.[%d]",errno);
+		session->err = STA_SESSION_ERR_HOST;
 		goto result_fail_with_close;
 	}
 	memcpy(&servaddr.sin_addr, he->h_addr, sizeof(struct in_addr));
@@ -272,6 +320,7 @@ static void socket_open(sta_session_s *session){
 	if(connect(session->sockfd, (SA *) &servaddr, sizeof(servaddr)) < 0){
 		if(EINPROGRESS != errno){
 			sta_log("connect() fail.[%d]",errno);
+			session->err = STA_SESSION_ERR_CONN;
 			goto result_fail_with_close;
 		}
 	}
@@ -296,12 +345,14 @@ static void socket_open(sta_session_s *session){
 			sta_log("Can read and write.");
 			if(getsockopt(session->sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0){
 				sta_log("getsockopt fail.[%d]",errno);
+				session->err = STA_SESSION_ERR_CONN;
 				goto result_fail_with_close;
 			}else{
 				sta_log("error = %d",error);
 				if(error == 0){ // Success
 					goto result_success;
 				}else{// Fail
+					session->err = STA_SESSION_ERR_CONN;
 					goto result_fail_with_close;
 				}
 			}
@@ -310,6 +361,7 @@ static void socket_open(sta_session_s *session){
 			goto result_success;
 		}else{
 			sta_log("Can read(Impossible).");
+			session->err = STA_SESSION_ERR_CONN;
 			goto result_fail_with_close;
 		}
 	}
@@ -347,10 +399,9 @@ result_success:
 	sta_log("end:success");
 	return;
 result_fail_with_close:
-	close(session->sockfd);
 result_fail:
-	session_reset(session);
 	sta_log("end:fail");
+	session->state = STA_SESSION_STATE_CLOSED;
 	return;
 }
 
@@ -365,7 +416,7 @@ static void* thread_run(void *data){
     {
 		sta_log("Session(%d) thread(%ld) wait ...",session->session_id,session->thread_id);
         pthread_cond_wait(&(session->cond), &(session->mutex));
-		msg = msg_queue_delete(session);
+		msg = msg_queue_pop(session);
 		sta_log("Thread(%ld) run:msg:%d:%s",session->thread_id,msg->msg_id,msg->data);
 		switch(msg->msg_id){
 			case STA_MSG_SOCKET_OPEN:{
@@ -373,24 +424,112 @@ static void* thread_run(void *data){
 				while(msg->data[i] != ':')
 					i++;
 				//sta_log("index = %d",i);
-				if(i > 0 && i < SESSION_HOST_MAX_LEN){
-					memcpy(session->host,msg->data,i);
-					session->port = (int)atoi((msg->data) + i + 1);
-					if(session->port > 0)
-						socket_open(session);
+				memcpy(session->host,msg->data,i);
+				session->port = (int)atoi((msg->data) + i + 1);
+				if(session->port > 0)
+					socket_open(session);
+
+				// Open session success
+				if(session->state == STA_SESSION_STATE_OPENED){
+					qmi_session_callback(session->session_id,
+						STA_MSG_SOCKET_OPEN,
+						STA_SESSION_ERR_SUCCESS,
+						NULL,
+						0);
+				}else{ // Open session fail
+					qmi_session_callback(-1,
+						STA_MSG_SOCKET_OPEN,
+						session->err,
+						NULL,
+						0);
+					session_reset(session);
 				}
 				break;
 			}
 			case STA_MSG_SOCKET_WRITE:{
+				int len = 0;
+				int count = 0;
+				while(count < msg->data_len){
+					len = write(session->sockfd,msg->data + count,msg->data_len - count);
+					if(len < 0){
+						if(errno == EWOULDBLOCK){
+							usleep(20);
+							continue;
+						}else{
+							sta_log("write error.[%d]",errno);
+							session->err = STA_SESSION_ERR_UNKNOWN;
+							break;
+						}
+					}else if(len == 0){
+						sta_log("write error(len == 0).[%d]",errno);
+					}else{
+						count += len;
+					}
+				}
 
+				if(count == msg->data_len){
+					qmi_session_callback(session->session_id,
+						STA_MSG_SOCKET_WRITE,
+						STA_SESSION_ERR_SUCCESS,
+						NULL,
+						count);
+				}else{ // Open session fail
+					qmi_session_callback(session->session_id,
+						STA_MSG_SOCKET_WRITE,
+						session->err,
+						NULL,
+						count);
+				}
 				break;
 			}
 			case STA_MSG_SOCKET_READ:{
+				int len = 0;
+				int count = 0;
+				char *buf = (char*)malloc(sizeof(char) * (msg->data_len + 1));
+				while(count < msg->data_len){
+					len = read(session->sockfd,buf + count,msg->data_len - count);
+					if(len < 0){
+						if(errno == EWOULDBLOCK){
+							usleep(20);
+							continue;
+						}else{
+							sta_log("read error.[%d]",errno);
+							session->err = STA_SESSION_ERR_UNKNOWN;
+							break;
+						}
+					}else if(len == 0){
+						sta_log("read error(len == 0).[%d]",errno);
+						break;
+					}else{
+						count += len;
+					}
+				}
+
+				buf[count] = '\0';
+
+				if(count == msg->data_len){
+					qmi_session_callback(session->session_id,
+						STA_MSG_SOCKET_READ,
+						STA_SESSION_ERR_SUCCESS,
+						buf,
+						count);
+				}else{ // Open session fail
+					qmi_session_callback(session->session_id,
+						STA_MSG_SOCKET_READ,
+						session->err,
+						buf,
+						count);
+				}
 
 				break;
 			}
 			case STA_MSG_SOCKET_CLOSE:{
-
+				qmi_session_callback(session->session_id,
+						STA_MSG_SOCKET_CLOSE,
+						STA_SESSION_ERR_SUCCESS,
+						NULL,
+						0);
+				session_reset(session);
 				break;
 			}
 			default:{
@@ -403,21 +542,82 @@ static void* thread_run(void *data){
 	return ((void*)0);
 }
 
-
-int session_open(const char *host,int port){
-	if(session_count >= SESSION_MAX_COUNT) {
+/**
+* Init session by host and port,and return session ID.
+*/
+int stanet_session_open(const char *host,int port){
+	//sta_log("start");
+	if(host == NULL || port <= 0
+		|| strlen(host) <= 0
+		|| strlen(host) > SESSION_HOST_MAX_LEN) {
 		return -1;
 	}
 
-	if(host == NULL || port <= 0) {
+	int session_id = session_get_usable();
+	//sta_log("session_id = %d",session_id);
+	if(session_id < 0){
+		sta_log("No usable session...");
 		return -1;
 	}
 
+	char str[SESSION_HOST_MAX_LEN + 5];
+	int len = snprintf(str,SESSION_HOST_MAX_LEN + 5,
+					"%s:%d",host,port);
+	str[len] = '\0';
+
+	send_msg(session_id, STA_MSG_SOCKET_OPEN, str,len);
+
+	return 0;
+}
 
 
+int stanet_session_write(int session_id,void *buf,int len){
+	//sta_log("session_id = %d",session_id);
+	sta_session_s *session = session_get(session_id);
+	if(session == NULL || (session->state != STA_SESSION_STATE_OPENED
+		&& session->state != STA_SESSION_STATE_WRITING
+		&& session->state != STA_SESSION_STATE_READING)) {
+		sta_log("Session error,can not write.");
+		return -1;
+	}
 
+	session->state = STA_SESSION_STATE_WRITING;
 
-	return -1;
+	send_msg(session_id, STA_MSG_SOCKET_WRITE, buf,len);
+
+	return 0;
+}
+
+int stanet_session_read(int session_id,void *buf,int len){
+	sta_session_s *session = session_get(session_id);
+	if(session == NULL || (session->state != STA_SESSION_STATE_OPENED
+		&& session->state != STA_SESSION_STATE_WRITING
+		&& session->state != STA_SESSION_STATE_READING)) {
+		sta_log("Session error,can not read.");
+		return -1;
+	}
+
+	session->state = STA_SESSION_STATE_READING;
+
+	send_msg(session_id, STA_MSG_SOCKET_READ, NULL,len);
+
+	return 0;
+}
+
+int stanet_session_close(int session_id){
+	sta_session_s *session = session_get(session_id);
+	if(session == NULL || (session->state != STA_SESSION_STATE_OPENED
+		&& session->state != STA_SESSION_STATE_WRITING
+		&& session->state != STA_SESSION_STATE_READING)) {
+		sta_log("Session error,can not read.");
+		return -1;
+	}
+
+	session->state = STA_SESSION_STATE_CLOSING;
+
+	send_msg(session_id, STA_MSG_SOCKET_READ, NULL,0);
+
+	return 0;
 }
 
 int main (int argc, char **argv)
@@ -425,22 +625,6 @@ int main (int argc, char **argv)
 	log_i("start");
 
 	init();
-
-	sleep(1);
-
-//	send_msg(4, STA_MSG_SOCKET_OPEN, "www.baidu.com:80");
-
-//	send_msg(2, STA_MSG_SOCKET_OPEN, "www.test.com:8081");
-
-//	send_msg(1, STA_MSG_SOCKET_READ, "Read:HTTP/1.1 OK ...");
-
-//	send_msg(1, STA_MSG_SOCKET_CLOSE, "Close:...");
-
-
-	send_msg(2, STA_MSG_SOCKET_OPEN, "www.baidu.com:80");
-	send_msg(0, STA_MSG_SOCKET_OPEN, "22.22.22.22:80");
-	send_msg(1, STA_MSG_SOCKET_OPEN, "192.168.1.198:80");
-
 
 	int nready;
     while (TRUE) {
