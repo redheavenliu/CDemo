@@ -1,0 +1,12 @@
+out/
+*~
+*.[oa]
+*.pp
+*.pyc
+*.pyo
+*.lib
+*.o
+*.xml.pp
+*.c.pp
+*.lib
+*.a

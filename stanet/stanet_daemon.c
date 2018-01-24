@@ -648,7 +648,7 @@ int main (int argc, char **argv)
 //                ev.events=EPOLLIN|EPOLLET;
 //                epoll_ctl(epfd,EPOLL_CTL_MOD,sockfd,&ev);
             } else if (epoll_events[i].events & EPOLLIN) {
-                sta_log("%d can read and write.",epoll_events[i].data.fd);
+                sta_log("%d can read.",epoll_events[i].data.fd);
                 //ev.data.fd=sockfd;
                 //ev.events=EPOLLOUT|EPOLLET;
                 //epoll_ctl(epfd,EPOLL_CTL_MOD,sockfd,&ev);
