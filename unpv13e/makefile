@@ -1,7 +1,7 @@
 ROOT=..
 include $(ROOT)/Make.defines
 
-PROGS =	main intro_cli intro_ser tcp_cli tcp_ser
+PROGS =	main intro_cli intro_ser tcp_cli tcp_ser udp_cli udp_ser
 
 all:	$(PROGS)
 

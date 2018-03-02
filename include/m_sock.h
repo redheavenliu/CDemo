@@ -27,6 +27,35 @@ sock_open
     const char *host,
     int port
 );
+
+int
+sock_ser_open
+(
+    int domain,
+    int type,
+    int port
+);
+
+int
+sock_cli_open
+(
+    int domain,
+    int type,
+    const void *host,
+    int port
+);
+
+int sockaddr_init(struct sockaddr_in *addr,void *host,int port,int family);
+
+ssize_t
+sock_recvfrom(int fd, void *buf, size_t len, int flags,
+                struct sockaddr *addr, socklen_t *addr_len);
+
+ssize_t
+sock_sendto(int fd, void *buf, size_t len,
+               int flags, struct sockaddr *addr,
+               socklen_t addr_len);
+
 /* int
  * inet_pton(af, src, dst)
  *	convert from presentation format (which usually means ASCII printable)
