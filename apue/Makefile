@@ -1,7 +1,7 @@
 ROOT=..
 include $(ROOT)/Make.defines
 
-PROGS =	main chapter_4 chapter_8 chapter_11 chapter_13
+PROGS =	main chapter_1 chapter_2 chapter_3 chapter_4 chapter_8 chapter_10 chapter_11 chapter_13
 
 all:	$(PROGS)
 
