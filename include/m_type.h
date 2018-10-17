@@ -5,6 +5,8 @@
 
 #include "../config"
 
+#define sint15 int
+
 /**
  * Compiler-digit : 16
  * char : 1     (%c)
@@ -58,22 +60,27 @@ typedef unsigned char bool; /* Boolean value type. */
 
 #ifdef M_UINT64_DEFINED
 typedef unsigned long long uint64; /* Unsigned 64 bit value */
+//typedef unsigned long long uint64_t; /* Unsigned 64 bit value */
 #endif
 
 #ifdef M_UINT32_LB_DEFINED
 #ifdef M_BIT_64
 typedef unsigned int uint32; /* Unsigned 32 bit value */
+typedef unsigned int uint32_t; /* Unsigned 32 bit value */
 #else
 typedef unsigned long int uint32; /* Unsigned 32 bit value */
+typedef unsigned long int uint32_t;
 #endif
 #endif
 
 #ifdef M_UINT16_DEFINED
 typedef unsigned short uint16; /* Unsigned 16 bit value */
+typedef unsigned short uint16_t;
 #endif
 
 #ifdef M_UINT8_DEFINED
 typedef unsigned char uint8; /* Unsigned 8  bit value */
+typedef unsigned char uint8_t;
 #endif
 
 #ifdef M_INT64_DEFINED

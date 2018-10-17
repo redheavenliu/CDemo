@@ -1,4 +1,5 @@
-DIRS = lib apue demo x unpv13e stanet
+DIRS = lib apue demo x unpv13e stanet coap
+#DIRS = lib coap
 OUT_DIR = out
 
 all:
